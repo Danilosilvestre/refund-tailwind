@@ -1,35 +1,110 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router"
+
+import {z, ZodError} from "zod"
+import { AxiosError } from "axios"
+
+import { api } from "../services/api"
 
 import fileSvg from "../assets/file.svg"
 import { CATEGORIES, CATEGORIES_KEYS } from "../utils/categories"
+import { formatCurrency } from "../utils/formatCurrency"
 
 import { Input } from "../components/Input"
 import { Select } from "../components/Select"
 import { Upload } from "../components/Upload"
 import { Button } from "../components/Button"
 
+const refundSchema = z.object({
+  name: z.string().min(3, {message: "Infome um nome claro para a solicitação"}),
+  category: z.string().min(1, {message: "Selecione uma categoria"}),
+  amount: z.coerce.number().positive({message: "Informe um valor válido"}),
+})
+
 export function Refund() {
-  const [name, setname] = useState("")
-  const [amount, setamount] = useState("")
-  const [category, setcategory] = useState("")
-  const [isLoading, setisLoading] = useState(false)
-  const [filename, setfilename] = useState<File | null>(null)
+  const [name, setName] = useState("")
+  const [amount, setAmount] = useState("")
+  const [category, setCategory] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
+  const [filename, setFileName] = useState<File | null>(null)
+  const [fileUrl, setFileUrl] = useState<string | null>(null)
 
   const navigate = useNavigate()
   const params = useParams<{id: string}>()
  
 
-  function onSubmit(event: React.FormEvent) {
+  async function onSubmit(event: React.FormEvent) {
     event.preventDefault()
 
     if(params.id){
       return navigate(-1)
     }
 
-    console.log(name, amount, category, filename)
-    navigate("/confirm", {state:{ fromSubmit: true}})
+    try {
+      setIsLoading(true)
+
+      if(!filename){
+         return alert("Selecione um arquivo")
+      }
+
+      const fileUploadForm = new FormData()
+      fileUploadForm.append("file", filename)
+
+      const response = await api.post("/uploads", fileUploadForm)
+
+      const data = refundSchema.parse({
+        name,
+        category,
+        amount: amount.replace(",", ".")
+      })
+
+      await api.post("/refunds",{
+        ...data,
+        filename: response.data.filename,
+      })
+      
+      navigate("/confirm", {state:{ fromSubmit: true}})
+    } catch (error) {
+      console.log(error)
+
+      if(error instanceof ZodError){
+        return alert(error.issues[0].message)
+    }
+
+    if(error instanceof AxiosError){
+      return alert(error.response?.data.message)
+    }
+
+   alert("Não foi possível realizar a solicitação")
+  }finally{
+    setIsLoading(false)
   }
+  }
+
+  async function fetchRefund(id: string) {
+    try {
+      const { data }= await api.get(`/refunds/${id}`)
+      
+      setName(data.name)
+      setCategory(data.category)
+      setAmount(formatCurrency(data.amount))
+      setFileUrl(data.filename)
+    } catch (error) {
+      console.log(error)
+
+      if(error instanceof AxiosError){
+        return alert(error.response?.data.message)
+      }
+
+      alert("Não foi possível carregar a solicitação")
+    }
+  }
+
+  useEffect(() =>{
+    if(params.id){
+      fetchRefund(params.id)
+    }
+  },[params.id])
 
   return (
   
@@ -44,7 +119,7 @@ export function Refund() {
      required
      legend="Nome da solicitação"
      value={name}
-     onChange={(e) =>setname(e.target.value)}
+     onChange={(e) =>setName(e.target.value)}
      disabled={!!params.id}
      />
 
@@ -53,7 +128,7 @@ export function Refund() {
       required
       legend="Categoria" 
       value={category}
-      onChange={(e) => setcategory(e.target.value)}
+      onChange={(e) => setCategory(e.target.value)}
       disabled={!!params.id}>
 
     {CATEGORIES_KEYS.map((category) => (
@@ -65,14 +140,14 @@ export function Refund() {
       required
       legend="Valor"
       value={amount}
-      onChange={(e) =>setamount(e.target.value)} 
+      onChange={(e) =>setAmount(e.target.value)} 
       disabled={!!params.id}/>
     </div>
 
     {
-      params.id ? (
+      params.id && fileUrl ? (
         <a 
-        href="https://www.rocketseat.com.br/" 
+        href={`http://localhost:3333/uploads/${fileUrl}`} 
         target="_blank"
         className="text-sm text-green-100 font-semibold flex items-center justify-center gap-2 my-6 hover:opacity-70 transition ease-linear">
           <img src={fileSvg} alt="Ícone de arquivo"/>
@@ -82,7 +157,7 @@ export function Refund() {
 
     <Upload 
       filename={filename && filename.name}
-      onChange={(e) => e.target.files && setfilename(e.target.files[0])}
+      onChange={(e) => e.target.files && setFileName(e.target.files[0])}
     />
       )}
 
